@@ -1,5 +1,6 @@
 # tested for python 3.8
 # conda create --name LineFormer python=3.8
+#added model weights download
 pip install openmim
 pip install chardet
 conda install pytorch==1.13.1 torchvision==0.14.1 pytorch-cuda=11.7 -c pytorch -c nvidia
