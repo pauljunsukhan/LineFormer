@@ -12,3 +12,5 @@ pip install scipy==1.9.3
 pip install -e mmdetection
 pip install bresenham
 pip install tqdm
+pip install gdown
+gdown 1TJSW_IlZh3qPCxi4c7MLiegpUSPCT1jF -O iter_3000.pth
