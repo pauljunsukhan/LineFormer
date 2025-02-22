@@ -138,7 +138,7 @@ if use_cleaning and annot_file is not None:
 # ============================================================
 # Set the input image path and read the image.
 # ============================================================
-img_path = "demo/LTC3097_fig16_highres_cropped_again.png"
+img_path = "demo/LTC3097_fig16.png"
 img = cv2.imread(img_path)  # BGR format
 
 # ============================================================
