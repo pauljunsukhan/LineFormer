@@ -131,9 +131,8 @@ def connect_lines(img):
 def interpolate(line_ds, inter_type='linear'):
     """
     pred_ds: predicted data series
-    inter_type: type of interpolation linear or cubic_spline
+    inter_type: type of interpolation linear or cubic/cubic_spline
     returns list of interpolation objects for each line in the mask
-
     """
 
     x = []
@@ -158,7 +157,7 @@ def interpolate(line_ds, inter_type='linear'):
     # Interpolate    
     if inter_type == 'linear':
         inter = interp1d(unique_x, unique_y)
-    if inter_type == 'cubic_spline':
+    if inter_type in ['cubic', 'cubic_spline']:
         inter = CubicSpline(unique_x, unique_y)
 
     inter_line_ds = []
@@ -189,12 +188,11 @@ def rescale_pred_ds(ds, transformation):
             pt['y'] = int((pt['y']-ty_padd) / sy) + ty_crop
     return ds
 
-def get_dataseries(img, annot=None, to_clean=False, post_proc=False, mask_kp_sample_interval=10, return_masks=False):
+def get_dataseries(img, annot=None, to_clean=False, post_proc=False, mask_kp_sample_interval=10, return_masks=False, interp_method='linear'):
     """
-        img: chart image as numpy array (3 channel) 
-        annot: json annot object in PMC format (required for cleaning the chart image before data extraction)
-        mask_kp_sample_interval: interval to sample points from predicted line mask to get data series
-        returns data series in pmc task 6a format ('visual elements') => list of lines, each a list of {x:, y: } points w.r.t original image
+    pred_ds: predicted data series
+    inter_type: type of interpolation linear or cubic/cubic_spline
+    returns list of interpolation objects for each line in the mask
     """
     global model
     # clean the image
@@ -206,7 +204,7 @@ def get_dataseries(img, annot=None, to_clean=False, post_proc=False, mask_kp_sam
     # Image.fromarray(clean_img)
 
     # get inference masks
-    inst_masks = do_instance(model, clean_img, score_thr=0.3)
+    inst_masks = do_instance(model, clean_img)
     # return inst_masks
     # mask_thresh = 0.5
     inst_masks = [line_mask.astype(np.uint8)*255 for line_mask in inst_masks]
@@ -230,7 +228,7 @@ def get_dataseries(img, annot=None, to_clean=False, post_proc=False, mask_kp_sam
         x_range = line_utils.get_xrange(line_mask)
         line_ds = line_utils.get_kp(line_mask, interval=mask_kp_sample_interval, x_range=x_range, get_num_lines=False, get_center=True)
         
-        line_ds = interpolate(line_ds, inter_type='linear')
+        line_ds = interpolate(line_ds, inter_type=interp_method)
 
         pred_ds.append(line_ds)
 

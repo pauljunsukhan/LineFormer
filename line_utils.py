@@ -2,6 +2,7 @@ import numpy as np
 import cv2
 from  matplotlib import pyplot as plt
 import scipy
+import colorsys
 
 # For line interpolation:
 # Comment this out if not using 'get_interp_points' function
@@ -34,9 +35,19 @@ def hsv_to_bgr(h, s, v):
     return (b, g, r)
 
 
-def get_distinct_colors(n): 
-    huePartition = 1.0 / (n + 1) 
-    return (hsv_to_bgr(huePartition * value, 1.0, 1.0) for value in range(0, n))
+def get_distinct_colors(n):
+    """
+    Generate n visually distinct colors in BGR format.
+    """
+    colors = []
+    for i in range(n):
+        hue = i / n
+        # Convert HSV to RGB; colorsys returns values between 0 and 1.
+        rgb = colorsys.hsv_to_rgb(hue, 1, 1)
+        # Convert RGB to BGR in the range 0-255 for OpenCV.
+        bgr = (int(rgb[2] * 255), int(rgb[1] * 255), int(rgb[0] * 255))
+        colors.append(bgr)
+    return colors
 
 
 def is_color(img):
@@ -103,73 +114,57 @@ def get_xrange(bin_line_mask):
         x_range = None
     return x_range
 
-def get_kp(line_img, interval=10, x_range=None, get_num_lines=False, get_center=True):
+def get_kp(line_img, interval=10, x_range=None, get_num_lines=False, get_center=True, multi_kp=False, vert_gap_thresh=2):
     """
-        line_img: np.ndarray => black and white binary mask of line
-        black => background => 0
-        white => foregrond line pixel => 255
-        interval: delta_x at which x,y points are sampled across the line_img
-        x_range: Range of x values, [xmin, xmax), within which pred points (x,y) are to be sampled
-        returns: a list [{'x': <x_val>, 'y': <y_val>}, ....] of line points found in the binary line_img
+    Extract keypoints from a binary mask of a line.
     """
-
     im_h, im_w = line_img.shape[:2]
     kps = []
-    # delta = 2
     if x_range is None:
         x_range = (0, im_w)
     
-    # track the number of vertical binary components found at every x => estimate num lines
-    num_comps = [] 
-    for x in range(x_range[0], x_range[1], interval):
-        # get the corresponding white pixel in this column
-        fg_y = []
-        fg_y_center = []
-        all_y_points = np.where(line_img[:, x] == 255)[0]
-        if all_y_points.size != 0:
-            fg_y.append(all_y_points[0])
-            y = all_y_points[0]
-            n_comps = 1
-            for idx in range(1, len(all_y_points)):
-                y_next = all_y_points[idx]
-                # print(y, y_next)
-                if abs(y_next - y) > 2:
-                    n_comps += 1
-                    # break found b/w y_next and y, separate components
-                    if fg_y[-1] != y:
-                        # handle the case where (first component itself is broken, i.e found break at idx=1)
-                        fg_y_center.append(round(y + fg_y[-1])//2)
-                        fg_y.append(y)
-                    else:
-                        fg_y_center.append(y)
-                        
-                    fg_y.append(y_next)
-                    
-                y = y_next
-                # print(fg_y,'\n', fg_y_center,  '\n')
-              
-            # print('last_point', y, y_next)
-            if fg_y[-1] != y:
-                # add the last point
-                fg_y_center.append(round(y + fg_y[-1])//2)
-                fg_y.append(y)
-            else:
-                fg_y_center.append(y)
-                    
-            num_comps.append(n_comps)
-        
-        if (fg_y or fg_y_center) and (n_comps==1):
-            if get_center:
-                kps.extend([{'x':float(x), 'y':y} for y in fg_y_center])
-            else:
-                kps.extend([{'x':float(x), 'y':y} for y in fg_y])
-        
-    res = kps
+    # Track the number of vertical components in each x-column
+    num_comps = []
     
-    if get_num_lines:
-        res = kps, int(np.percentile(num_comps, 85))
+    for x in range(x_range[0], x_range[1], interval):
+        # Get all white pixels in this column
+        all_y_points = np.where(line_img[:, x] == 255)[0]
         
-    return res
+        if len(all_y_points) == 0:
+            continue
+            
+        # Group points into components based on vertical gaps
+        components = []
+        current_component = [all_y_points[0]]
+        
+        for y in all_y_points[1:]:
+            if y - current_component[-1] > vert_gap_thresh:
+                # Gap detected, start new component
+                components.append(current_component)
+                current_component = [y]
+            else:
+                current_component.append(y)
+        
+        components.append(current_component)
+        
+        # Add keypoints for each component
+        if multi_kp:
+            for comp in components:
+                if get_center:
+                    y = int(np.mean(comp))
+                else:
+                    y = int(comp[0])  # or any other strategy
+                kps.append({"x": float(x), "y": float(y)})
+        else:
+            if len(components) == 1:
+                y = int(np.mean(components[0])) if get_center else int(components[0][0])
+                kps.append({"x": float(x), "y": float(y)})
+        
+        num_comps.append(len(components))
+
+    if get_num_lines:
+        return kps, int(np.median(num_comps)) if num_comps else 1
+    return kps
 
 
 def draw_edge(img, edge):
@@ -208,27 +203,51 @@ def points_to_array(pred_ds):
     return res
 
 # res = line_utils.draw_lines(img, points_to_array(pred_ds))
-def draw_lines(img, lines, classes=None):
-    if is_color(img):
-        annot_img = img.copy()
-    else:
-        annot_img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+def draw_lines(img, lines, thickness=2):
+    """
+    Draw digitized lines on an image based on keypoints.
     
-    if classes is None:
-        classes = list(range(len(lines)))
-    if len(classes):
-        colors = list(get_distinct_colors(max(classes)+1))
-        color_map = dict(zip(range(max(classes)+1), colors))
-        # print('color_map:', color_map)
-        
-        for line_idx, line in enumerate(lines):
-            options = dict(color=color_map[classes[line_idx]], thickness=2)
-            drawing_lines = []
-            for pt_idx in range(len(line)-1):
-                drawing_lines.append([line[pt_idx], line[pt_idx+1]])
-            annot_img = cv2.polylines(annot_img, np.array(drawing_lines), isClosed=False, **options)
-
-    return annot_img
+    Args:
+        img (numpy.ndarray): Input image.
+        lines (list): A list of lines, where each line is a list of keypoints.
+                      Each keypoint can be a dict with keys "x" and "y" or a list/tuple.
+        thickness (int): Thickness for the drawn lines.
+    
+    Returns:
+        numpy.ndarray: The image with lines drawn.
+    """
+    annotated_img = img.copy()
+    
+    # Wrap a single line into a list if needed.
+    if lines and (isinstance(lines[0], dict) or 
+                  (isinstance(lines[0], (list, tuple)) and len(lines[0]) == 2 and isinstance(lines[0][0], (int, float)))):
+        if not (isinstance(lines[0][0], (list, dict))):
+            lines = [lines]
+    
+    n_lines = len(lines)
+    # Generate distinct colors if we have more than one line.
+    if n_lines > 1:
+        colors = get_distinct_colors(n_lines)
+    else:
+        colors = [(0, 255, 0)]
+    
+    for idx, line in enumerate(lines):
+        pts = []
+        for pt in line:
+            if isinstance(pt, dict):
+                x_val = int(round(pt["x"]))
+                y_val = int(round(pt["y"]))
+            elif isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                x_val = int(round(pt[0]))
+                y_val = int(round(pt[1]))
+            else:
+                continue
+            pts.append([x_val, y_val])
+        if pts:
+            pts = np.array(pts, dtype=np.int32).reshape((-1, 1, 2))
+            annotated_img = cv2.polylines(annotated_img, [pts], isClosed=False, color=colors[idx], thickness=thickness)
+    
+    return annotated_img
 
 
 # Get the line points that would lie between ptA and ptB, according to the bresenham algorithm

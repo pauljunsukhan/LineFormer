@@ -15,3 +15,5 @@ pip install bresenham
 pip install tqdm
 pip install gdown
 gdown 1TJSW_IlZh3qPCxi4c7MLiegpUSPCT1jF -O iter_3000.pth
+apt-get update
+apt-get install -y libgl1-mesa-glx libglib2.0-0
